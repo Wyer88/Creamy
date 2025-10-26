@@ -1,0 +1,82 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color: #f7f8ff;
+  background-color: #05060d;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  @apply bg-night text-slate-100 font-sans min-h-screen overflow-x-hidden;
+}
+
+body::before {
+  content: '';
+  position: fixed;
+  inset: -30vh 0 0 0;
+  z-index: -2;
+  pointer-events: none;
+  background-image:
+    radial-gradient(120% 100% at 50% 90%, rgba(255, 230, 214, 0.18), transparent),
+    radial-gradient(80% 60% at 70% 10%, rgba(255, 170, 210, 0.25), transparent),
+    linear-gradient(130deg, #05060d 0%, #090b16 45%, #1a1030 100%);
+  filter: blur(20px);
+  background-attachment: fixed;
+}
+
+body::after {
+  content: '';
+  position: fixed;
+  inset: -20vh 0;
+  z-index: -3;
+  pointer-events: none;
+  background-image: radial-gradient(circle at 20% 20%, rgba(255, 255, 255, 0.12), transparent 45%);
+  mix-blend-mode: screen;
+  opacity: 0.4;
+}
+
+@layer components {
+  .hero-sheen {
+    position: relative;
+    overflow: hidden;
+    isolation: isolate;
+    background: transparent;
+  }
+
+  .hero-sheen::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    z-index: -2;
+    background-image: radial-gradient(circle at 20% 20%, rgba(255, 255, 255, 0.12), transparent 45%);
+    pointer-events: none;
+    mix-blend-mode: screen;
+  }
+
+  .hero-sheen::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    z-index: -3;
+    background-image: url('/images/creamy_original.jpg');
+    background-size: 190% auto;
+    background-position: center top;
+    opacity: 0.08;
+    filter: blur(32px) saturate(0.75);
+    pointer-events: none;
+  }
+
+  .glass-button {
+    @apply inline-flex items-center gap-2 rounded-full border border-white/20 bg-white/15 px-4 py-2 text-sm font-semibold text-slate-900 transition hover:bg-white/25 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-creamyGold/80;
+    backdrop-filter: blur(12px);
+  }
+
+  .caption-bubble {
+    @apply rounded-full border border-white/20 bg-white/10 px-5 py-3 text-base font-medium text-creamyRose shadow-lg backdrop-blur;
+  }
+}
