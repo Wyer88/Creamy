@@ -42,11 +42,41 @@ const usePrefersReducedMotion = () => {
   return prefers;
 };
 
+const PRESET_LEADERS = [
+  { name: 'CreamLord', pokes: 100 },
+  { name: 'MilkyMischief', pokes: 42 },
+  { name: 'SirSpill', pokes: 36 },
+  { name: 'DairyDuke', pokes: 28 },
+  { name: 'FoamFrenzy', pokes: 24 },
+  { name: 'LactoseLegend', pokes: 20 },
+  { name: 'ButterBuddy', pokes: 18 },
+  { name: 'CreamyCeleste', pokes: 12 },
+];
+
+const INITIAL_DONUTS = [
+  { id: 'donut-0', left: '12%', top: '9%', size: 120, image: 'images/donuts-noback.png' },
+  { id: 'donut-1', left: '30%', top: '8%', size: 110, image: 'images/donuts-noback1.png' },
+  { id: 'donut-2', left: '52%', top: '5%', size: 120, image: 'images/donuts-noback2.png' },
+  { id: 'donut-3', left: '65%', top: '18%', size: 118, image: 'images/donuts-noback3.png' },
+  { id: 'donut-4', left: '32%', top: '21%', size: 100, image: 'images/donuts-noback4.png' },
+  { id: 'donut-5', left: '20%', top: '25%', size: 108, image: 'images/donuts-noback5.png' },
+];
+
+const createDonuts = () => INITIAL_DONUTS.map((item) => ({ ...item }));
+
+const assetPath = (relativePath) => {
+  const base = import.meta.env.BASE_URL || '/';
+  const normalizedBase = base.endsWith('/') ? base : `${base}/`;
+  const normalizedPath = relativePath.startsWith('/') ? relativePath.slice(1) : relativePath;
+  return `${normalizedBase}${normalizedPath}`;
+};
+
 function App() {
   const heroRef = useRef(null);
   const creamyRef = useRef(null);
   const rippleCanvasRef = useRef(null);
   const captionTimer = useRef(null);
+  const glowTimer = useRef(null);
   const pointerRef = useRef({ x: 0.5, y: 0.5 });
   const rippleStore = useRef({
     ripples: [],
@@ -58,11 +88,40 @@ function App() {
 
   const [captionTick, setCaptionTick] = useState(0);
   const [captionActive, setCaptionActive] = useState(false);
+  const [username, setUsername] = useState('');
+  const [pokeCount, setPokeCount] = useState(0);
+  const [videoOpen, setVideoOpen] = useState(false);
+  const [isHoveringBelly, setIsHoveringBelly] = useState(false);
+  const [donuts, setDonuts] = useState(createDonuts);
+  const [laserShots, setLaserShots] = useState([]);
 
   const prefersReducedMotion = usePrefersReducedMotion();
   const isCoarsePointer = useMemo(() => {
     if (typeof window === 'undefined' || !window.matchMedia) return false;
     return window.matchMedia('(pointer: coarse)').matches;
+  }, []);
+  const creamyVideoHref = useMemo(() => assetPath('video/creamy-teaser.mov'), []);
+  const displayName = username.trim() || 'Guest';
+  const handleNameChange = useCallback((event) => {
+    setUsername(event.target.value.slice(0, 32));
+  }, []);
+  const videoRef = useRef(null);
+  const laserTimers = useRef([]);
+  const leaderboard = useMemo(() => {
+    const others = PRESET_LEADERS.filter((entry) => entry.name !== displayName);
+    const combined = [...others, { name: displayName, pokes: pokeCount }];
+    return combined.sort((a, b) => b.pokes - a.pokes).slice(0, 8);
+  }, [displayName, pokeCount]);
+  const totalDonuts = INITIAL_DONUTS.length;
+  const donutsEliminated = totalDonuts - donuts.length;
+  const missionComplete = pokeCount >= 10 && donutsEliminated >= totalDonuts;
+  const handleReset = useCallback(() => {
+    setUsername('');
+    setPokeCount(0);
+    setDonuts(createDonuts());
+    setLaserShots([]);
+    window.sessionStorage.removeItem('creamy-username');
+    window.sessionStorage.removeItem('creamy-pokes');
   }, []);
 
   const updateParallax = useCallback(
@@ -183,6 +242,7 @@ function App() {
     (heroPoint, creamyPoint = { x: 0.5, y: 0.6 }) => {
       const creamy = creamyRef.current;
       if (!creamy) return;
+      creamy.classList.add('belly-poked');
       const baseTransform = creamy.style.transform;
       const dx = (heroPoint.x - 0.5) * 28;
       const dy = (heroPoint.y - 0.5) * 22;
@@ -208,6 +268,11 @@ function App() {
       spawnRipple(heroPoint, 1.25);
       playGiggle();
       showCaption();
+
+      window.clearTimeout(glowTimer.current);
+      glowTimer.current = window.setTimeout(() => {
+        creamyRef.current?.classList.remove('belly-poked');
+      }, prefersReducedMotion ? 180 : 420);
     },
     [playGiggle, prefersReducedMotion, showCaption, spawnRipple]
   );
@@ -216,6 +281,14 @@ function App() {
     (event) => {
       const heroPoint = getPointInElement(heroRef.current, event.clientX, event.clientY);
       if (!heroPoint) return;
+      const creamyPoint = getPointInElement(creamyRef.current, event.clientX, event.clientY);
+      const hoveringBelly =
+        creamyPoint?.within &&
+        creamyPoint.x >= BELLY_ZONE.minX &&
+        creamyPoint.x <= BELLY_ZONE.maxX &&
+        creamyPoint.y >= BELLY_ZONE.minY &&
+        creamyPoint.y <= BELLY_ZONE.maxY;
+      setIsHoveringBelly(Boolean(hoveringBelly));
       updateParallax(heroPoint);
     },
     [updateParallax]
@@ -223,6 +296,7 @@ function App() {
 
   const handlePointerLeave = useCallback(() => {
     updateParallax({ x: 0.5, y: 0.5 });
+    setIsHoveringBelly(false);
   }, [updateParallax]);
 
   const handleWheel = useCallback(
@@ -251,12 +325,86 @@ function App() {
         creamyPoint.y <= BELLY_ZONE.maxY;
 
       if (inBelly) {
+        setPokeCount((count) => count + 1);
         triggerPoke(heroPoint, creamyPoint);
       } else {
         spawnRipple(heroPoint, tappedCreamy ? 0.6 : 0.4);
       }
+      setIsHoveringBelly(Boolean(inBelly));
     },
     [triggerPoke, spawnRipple]
+  );
+
+  const playLaserSound = useCallback(() => {
+    const ctx = ensureAudioContext();
+    if (!ctx) return;
+    const now = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(520, now);
+    osc.frequency.exponentialRampToValueAtTime(220, now + 0.22);
+    gain.gain.setValueAtTime(0.35, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.25);
+    osc.connect(gain).connect(ctx.destination);
+    osc.start(now);
+    osc.stop(now + 0.25);
+  }, [ensureAudioContext]);
+
+  const handleDonutClick = useCallback(
+    (donut, event) => {
+      event.stopPropagation();
+      if (donut.evaporating) return;
+      const hero = heroRef.current;
+      const creamy = creamyRef.current;
+      if (!hero || !creamy) return;
+      const heroRect = hero.getBoundingClientRect();
+      const creamyRect = creamy.getBoundingClientRect();
+      const donutRect = event.currentTarget.getBoundingClientRect();
+
+      const toHeroCoords = (point) => ({
+        x: point.x - heroRect.left,
+        y: point.y - heroRect.top,
+      });
+
+      const targetPoint = toHeroCoords({
+        x: donutRect.left + donutRect.width / 2,
+        y: donutRect.top + donutRect.height / 2,
+      });
+
+      const leftEye = toHeroCoords({
+        x: creamyRect.left + creamyRect.width * 0.42,
+        y: creamyRect.top + creamyRect.height * 0.27,
+      });
+
+      const rightEye = toHeroCoords({
+        x: creamyRect.left + creamyRect.width * 0.58,
+        y: creamyRect.top + creamyRect.height * 0.28,
+      });
+
+      const timestamp = Date.now();
+      const prefix = `${donut.id}-${timestamp}`;
+      const newShots = [
+        { id: `${prefix}-L`, start: leftEye, end: targetPoint },
+        { id: `${prefix}-R`, start: rightEye, end: targetPoint },
+      ];
+      setLaserShots((shots) => [...shots, ...newShots]);
+      playLaserSound();
+
+      const timerId = window.setTimeout(() => {
+        setLaserShots((shots) => shots.filter((shot) => !shot.id.startsWith(prefix)));
+      }, 700);
+      laserTimers.current.push(timerId);
+
+      setDonuts((current) =>
+        current.map((item) => (item.id === donut.id ? { ...item, evaporating: true } : item))
+      );
+      const removeId = window.setTimeout(() => {
+        setDonuts((current) => current.filter((item) => item.id !== donut.id));
+      }, 520);
+      laserTimers.current.push(removeId);
+    },
+    [playLaserSound]
   );
 
   useEffect(() => {
@@ -319,11 +467,19 @@ function App() {
     };
   }, []);
 
-  useEffect(() => () => window.clearTimeout(captionTimer.current), []);
+  useEffect(
+    () => () => {
+      window.clearTimeout(captionTimer.current);
+      window.clearTimeout(glowTimer.current);
+      laserTimers.current.forEach((id) => window.clearTimeout(id));
+      laserTimers.current = [];
+    },
+    []
+  );
 
   useEffect(() => {
     if (typeof window === 'undefined') return undefined;
-    const audio = new Audio('/audio/giggle.m4a');
+    const audio = new Audio(assetPath('audio/giggle.m4a'));
     audio.preload = 'auto';
     const markUnavailable = () => {
       audioElementRef.current = null;
@@ -336,14 +492,134 @@ function App() {
   }, []);
 
   useEffect(() => {
+    if (typeof window === 'undefined') return undefined;
+    const storedName = window.sessionStorage.getItem('creamy-username');
+    const storedPokes = window.sessionStorage.getItem('creamy-pokes');
+    if (storedName) setUsername(storedName);
+    if (storedPokes) {
+      const parsed = Number.parseInt(storedPokes, 10);
+      if (!Number.isNaN(parsed)) setPokeCount(parsed);
+    }
+    return undefined;
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    window.sessionStorage.setItem('creamy-username', username);
+  }, [username]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    window.sessionStorage.setItem('creamy-pokes', String(pokeCount));
+  }, [pokeCount]);
+
+  useEffect(() => {
+    if (!videoOpen && videoRef.current) {
+      videoRef.current.pause();
+      videoRef.current.currentTime = 0;
+    }
+  }, [videoOpen]);
+
+  useEffect(() => {
     updateParallax({ x: 0.5, y: 0.5 });
   }, [updateParallax]);
 
   return (
     <main className="relative min-h-screen overflow-x-hidden bg-night text-white">
+      {missionComplete && (
+        <div className="mission-banner glass-panel">
+          <p className="text-sm uppercase tracking-[0.35em] text-creamyRose">Mission complete</p>
+          <p className="mt-2 text-base text-white">
+            Congratulations! You've made Creamy's day! You poked his belly 10 times and helped him fetch all his missing
+            donuts. You truly are amazing.
+          </p>
+          <img
+            src={assetPath('images/goldendonut-noback.png')}
+            alt="Golden donut"
+            className="mt-4 w-full max-w-[260px] drop-shadow-creamy"
+          />
+        </div>
+      )}
+      {videoOpen && (
+        <div className="video-overlay" onClick={() => setVideoOpen(false)}>
+          <div className="video-dialog" onClick={(event) => event.stopPropagation()}>
+            <div className="flex items-center justify-between text-white/80">
+              <span className="text-sm uppercase tracking-[0.35em]">Creamy teaser</span>
+              <button type="button" className="close-icon" onClick={() => setVideoOpen(false)} aria-label="Close video">
+                ×
+              </button>
+            </div>
+            <video
+              ref={videoRef}
+              className="video-player"
+              controls
+              autoPlay
+              playsInline
+              loop
+              src={creamyVideoHref}
+            />
+          </div>
+        </div>
+      )}
+      <div className="mission-column fixed right-6 top-6 z-30 flex w-72 flex-col items-stretch gap-3">
+        <a
+          href="https://x.com/milkmancreamy"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="glass-button shadow-lg transition-transform duration-700 ease-out hover:-translate-y-0.5"
+        >
+          <svg viewBox="0 0 24 24" className="h-5 w-5" aria-hidden="true" focusable="false">
+            <path
+              d="M18.244 2H21l-6.46 7.386L22 22h-6.59l-4.61-6.09L5.29 22H2l6.98-7.995L2 2h6.59l4.25 5.65L18.244 2Zm-2.313 18h1.55L7.16 4h-1.6l10.37 16Z"
+              fill="currentColor"
+            />
+          </svg>
+          <span>@milkmancreamy</span>
+        </a>
+        <button
+          type="button"
+          className="glass-button justify-between shadow-lg transition-transform duration-700 ease-out hover:-translate-y-0.5"
+          onClick={() => setVideoOpen(true)}
+        >
+          <span>Watch Creamy</span>
+          <svg viewBox="0 0 24 24" className="h-5 w-5" aria-hidden="true" focusable="false">
+            <path d="M8 5v14l11-7z" fill="currentColor" />
+          </svg>
+        </button>
+        <div className="glass-panel">
+          <p className="text-xs uppercase tracking-[0.35em] text-white/60">Belly pokes</p>
+          <p className="mt-1 text-3xl font-semibold text-white">{pokeCount}</p>
+          <p className="text-xs text-white/60">This session • {displayName}</p>
+        </div>
+        <div className="glass-panel">
+          <p className="text-xs uppercase tracking-[0.35em] text-white/60">Donuts eliminated</p>
+          <p className="mt-1 text-3xl font-semibold text-white">{donutsEliminated}</p>
+          <p className="text-xs text-white/60">
+            {totalDonuts - donutsEliminated} remaining • max {totalDonuts}
+          </p>
+        </div>
+        <div className="glass-panel overflow-hidden">
+          <p className="text-xs uppercase tracking-[0.35em] text-white/60">Top Poke Pros</p>
+          <table className="leaderboard-table">
+            <tbody>
+              {leaderboard.map((entry, index) => (
+                <tr key={`${entry.name}-${index}`}>
+                  <td>{index + 1}</td>
+                  <td className="truncate">{entry.name}</td>
+                  <td className="text-right">{entry.pokes}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <button type="button" className="glass-button justify-center" onClick={handleReset}>
+          Reset session
+        </button>
+      </div>
       <div
         ref={heroRef}
         className="hero-sheen relative flex min-h-[160vh] flex-col items-center justify-start px-4 pb-32 pt-0 sm:px-10"
+        style={{ '--hero-photo': `url(${assetPath('images/creamy_original.jpg')})` }}
         onPointerMove={handlePointerMove}
         onPointerLeave={handlePointerLeave}
         onPointerDown={handlePointerDown}
@@ -352,15 +628,57 @@ function App() {
         <div className="pointer-events-none absolute inset-0 z-0" aria-hidden="true">
           <canvas ref={rippleCanvasRef} className="h-full w-full opacity-80" />
         </div>
+        <div className="donut-layer absolute inset-0 z-30">
+          {laserShots.map((shot) => {
+            const dx = shot.end.x - shot.start.x;
+            const dy = shot.end.y - shot.start.y;
+            const length = Math.hypot(dx, dy);
+            const angle = Math.atan2(dy, dx) * (180 / Math.PI);
+            return (
+              <span
+                key={shot.id}
+                className="laser-beam"
+                style={{
+                  left: `${shot.start.x}px`,
+                  top: `${shot.start.y}px`,
+                  width: `${length}px`,
+                  transform: `rotate(${angle}deg)`,
+                }}
+              />
+            );
+          })}
+          {donuts.map((donut) => (
+            <button
+              key={donut.id}
+              type="button"
+              className={`donut ${donut.evaporating ? 'evaporating' : ''}`}
+              style={{
+                left: donut.left,
+                top: donut.top,
+                width: `${donut.size}px`,
+                height: `${donut.size}px`,
+                backgroundImage: `url(${assetPath(donut.image)})`,
+              }}
+              onClick={(event) => handleDonutClick(donut, event)}
+              aria-label={`Evaporate ${donut.id} donut`}
+            >
+              <span className="donut-hole" />
+            </button>
+          ))}
+        </div>
 
         <div className="relative z-10 flex w-full max-w-5xl flex-col items-center gap-12 pb-12">
           <div className="order-1 relative isolate -mt-6 flex w-full items-start justify-center sm:-mt-4">
             <img
               ref={creamyRef}
-              src="/images/creamy_cutout.png"
+              src={assetPath('images/creamy_cutout.png')}
               alt="Creamy posing with playful energy"
-              className="h-auto w-[min(96vw,1200px)] max-h-[165vh] select-none object-contain object-top drop-shadow-creamy"
+              className="creamy-figure h-auto w-[min(96vw,1200px)] max-h-[165vh] select-none object-contain object-top drop-shadow-creamy"
               draggable={false}
+            />
+            <span
+              className={`belly-guidance pointer-events-none absolute left-1/2 top-[50%] z-10 h-[24%] w-[46%] -translate-x-1/2 -translate-y-[45%] rounded-[45%] ${isHoveringBelly ? 'is-active' : ''}`}
+              aria-hidden="true"
             />
             <span className="pointer-events-none absolute inset-0 -z-10 rounded-[40%] bg-white/10 blur-[110px]" />
           </div>
@@ -370,11 +688,37 @@ function App() {
             <h1 className="max-w-2xl text-4xl font-semibold text-white sm:text-5xl">
               Premium milkman mischief in one playful page
             </h1>
-            <p className="max-w-xl text-balance text-base text-white/70 sm:text-lg">
-              Scroll to send silky ripples, poke the belly for a giggle, and glide through a tactile vignette that feels
-              alive yet refined.
-            </p>
+          <p className="max-w-xl text-balance text-base text-white/70 sm:text-lg">
+            Scroll to send silky ripples, poke the belly for a giggle, and glide through a tactile vignette that feels
+            alive yet refined.
+          </p>
+
+          <div className="session-panel relative z-10 mt-2 w-full max-w-lg rounded-3xl border border-white/10 bg-white/5 p-5 text-left shadow-2xl backdrop-blur">
+            <p className="text-xs uppercase tracking-[0.35em] text-white/60">Tag your session</p>
+            <label className="mt-3 block text-sm text-white/80" htmlFor="creamy-username">
+              Username
+            </label>
+            <input
+              id="creamy-username"
+              name="creamy-username"
+              type="text"
+              autoComplete="off"
+              maxLength={32}
+              value={username}
+              onChange={handleNameChange}
+              placeholder="e.g. MilkyMischief"
+              className="mt-1 w-full rounded-2xl border border-white/20 bg-white/10 px-4 py-2 text-base text-white placeholder-white/40 outline-none focus:border-creamyRose focus:bg-white/15"
+            />
+            <button
+              type="button"
+              className="glass-button mt-4 w-full justify-between"
+              aria-live="polite"
+            >
+              <span>{displayName}</span>
+              <span className="text-white/80 text-sm">Pokes {pokeCount}</span>
+            </button>
           </div>
+        </div>
         </div>
 
         <div className="pointer-events-none absolute bottom-16 left-1/2 z-20 -translate-x-1/2" aria-live="polite">
@@ -385,20 +729,6 @@ function App() {
           )}
         </div>
 
-        <a
-          href="https://x.com/milkmancreamy"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="glass-button fixed right-6 top-6 z-30 animate-float shadow-lg transition-transform duration-700 ease-out hover:-translate-y-0.5"
-        >
-          <svg viewBox="0 0 24 24" className="h-5 w-5" aria-hidden="true" focusable="false">
-            <path
-              d="M18.244 2H21l-6.46 7.386L22 22h-6.59l-4.61-6.09L5.29 22H2l6.98-7.995L2 2h6.59l4.25 5.65L18.244 2Zm-2.313 18h1.55L7.16 4h-1.6l10.37 16Z"
-              fill="currentColor"
-            />
-          </svg>
-          <span>@milkmancreamy</span>
-        </a>
       </div>
     </main>
   );
