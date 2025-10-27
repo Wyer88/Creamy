@@ -55,7 +55,7 @@ const PRESET_LEADERS = [
 
 const INITIAL_DONUTS = [
   { id: 'donut-0', left: '12%', top: '9%', size: 120, image: 'images/donuts-noback.png' },
-  { id: 'donut-1', left: '30%', top: '8%', size: 110, image: 'images/donuts-noback1.png' },
+  { id: 'donut-1', left: '10%', top: '4%', size: 110, image: 'images/donuts-noback1.png' },
   { id: 'donut-2', left: '52%', top: '5%', size: 120, image: 'images/donuts-noback2.png' },
   { id: 'donut-3', left: '65%', top: '18%', size: 118, image: 'images/donuts-noback3.png' },
   { id: 'donut-4', left: '32%', top: '21%', size: 100, image: 'images/donuts-noback4.png' },
@@ -96,6 +96,7 @@ function App() {
   const [laserShots, setLaserShots] = useState([]);
   const [isMobile, setIsMobile] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [bannerDismissed, setBannerDismissed] = useState(false);
 
   const prefersReducedMotion = usePrefersReducedMotion();
   const isCoarsePointer = useMemo(() => {
@@ -117,6 +118,7 @@ function App() {
   const totalDonuts = INITIAL_DONUTS.length;
   const donutsEliminated = totalDonuts - donuts.length;
   const missionComplete = pokeCount >= 10 && donutsEliminated >= totalDonuts;
+  const showMissionBanner = missionComplete && !bannerDismissed;
   const handleReset = useCallback(() => {
     setUsername('');
     setPokeCount(0);
@@ -209,16 +211,28 @@ function App() {
   }, [ensureAudioContext]);
 
   const playGiggle = useCallback(() => {
-    const audioElement = audioElementRef.current;
-    if (audioElement && audioElement.readyState >= 2) {
+    let audioElement = audioElementRef.current;
+    if (!audioElement) {
+      audioElement = new Audio(assetPath('audio/giggle.m4a'));
+      audioElement.preload = 'auto';
+      audioElementRef.current = audioElement;
+    }
+
+    const playElement = () => {
       audioElement.currentTime = 0;
       audioElement.play().catch(() => {
         audioElementRef.current = null;
         synthGiggle();
       });
-      return;
+    };
+
+    if (audioElement.readyState >= 2) {
+      playElement();
+    } else {
+      const handleReady = () => playElement();
+      audioElement.addEventListener('canplaythrough', handleReady, { once: true });
+      audioElement.load();
     }
-    synthGiggle();
   }, [synthGiggle]);
 
   const spawnRipple = useCallback(
@@ -536,22 +550,36 @@ function App() {
   }, [videoOpen]);
 
   useEffect(() => {
+    if (!missionComplete) {
+      setBannerDismissed(false);
+    }
+  }, [missionComplete]);
+
+  useEffect(() => {
     updateParallax({ x: 0.5, y: 0.5 });
   }, [updateParallax]);
 
   return (
     <main className="relative min-h-screen overflow-x-hidden bg-night text-white">
-      {missionComplete && (
+      {showMissionBanner && (
         <div className="mission-banner glass-panel">
-          <p className="text-sm uppercase tracking-[0.35em] text-creamyRose">Mission complete</p>
-          <p className="mt-2 text-base text-white">
+          <button
+            type="button"
+            className="close-icon"
+            aria-label="Dismiss mission banner"
+            onClick={() => setBannerDismissed(true)}
+          >
+            ×
+          </button>
+          <p className="text-xs uppercase tracking-[0.4em] text-creamyRose">Mission complete</p>
+          <p className="mt-2 text-sm text-white">
             Congratulations! You've made Creamy's day! You poked his belly 10 times and helped him fetch all his missing
             donuts. You truly are amazing.
           </p>
           <img
             src={assetPath('images/goldendonut-noback.png')}
             alt="Golden donut"
-            className="mt-4 w-full max-w-[260px] drop-shadow-creamy"
+            className="mt-3 w-full max-w-[200px] drop-shadow-creamy"
           />
         </div>
       )}
@@ -585,6 +613,14 @@ function App() {
         <div
           className={`mission-column ${isMobile ? 'mobile' : ''} fixed right-6 top-6 z-30 flex w-72 flex-col items-stretch gap-3`}
         >
+          {isMobile && (
+            <div className="hud-header">
+              <span>Stats & Pokes</span>
+              <button type="button" className="close-icon" aria-label="Close stats" onClick={() => setSidebarOpen(false)}>
+                ×
+              </button>
+            </div>
+          )}
           <a
             href="https://x.com/milkmancreamy"
             target="_blank"
@@ -638,11 +674,6 @@ function App() {
           <button type="button" className="glass-button justify-center" onClick={handleReset}>
             Reset session
           </button>
-          {isMobile && (
-            <button type="button" className="glass-button justify-center" onClick={() => setSidebarOpen(false)}>
-              Close
-            </button>
-          )}
         </div>
       )}
       <div

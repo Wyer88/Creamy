@@ -105,7 +105,8 @@ body::after {
     left: 6px;
     top: 6px;
     z-index: 30;
-    width: min(320px, 80vw);
+    width: min(260px, 78vw);
+    padding: 1.2rem 2.5rem 1.2rem 1.2rem;
   }
 
   .mission-column.mobile {
@@ -117,8 +118,9 @@ body::after {
     width: auto;
     max-height: 70vh;
     padding-right: 0;
-    background: rgba(5, 6, 13, 0.9);
+    background: rgba(5, 6, 13, 0.92);
     border-radius: 1.5rem;
+    box-shadow: 0 25px 60px rgba(0, 0, 0, 0.45);
   }
 
   .hud-toggle {
@@ -139,6 +141,26 @@ body::after {
     .hud-toggle {
       display: inline-flex;
     }
+  }
+
+  .mission-banner .close-icon {
+    position: absolute;
+    top: 0.3rem;
+    right: 0.4rem;
+  }
+
+  .hud-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.25rem 0.25rem 0;
+  }
+
+  .hud-header span {
+    font-size: 0.7rem;
+    letter-spacing: 0.4em;
+    text-transform: uppercase;
+    color: rgba(255, 255, 255, 0.6);
   }
 
   .leaderboard-table {
