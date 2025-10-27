@@ -94,6 +94,8 @@ function App() {
   const [isHoveringBelly, setIsHoveringBelly] = useState(false);
   const [donuts, setDonuts] = useState(createDonuts);
   const [laserShots, setLaserShots] = useState([]);
+  const [isMobile, setIsMobile] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
 
   const prefersReducedMotion = usePrefersReducedMotion();
   const isCoarsePointer = useMemo(() => {
@@ -122,6 +124,19 @@ function App() {
     setLaserShots([]);
     window.sessionStorage.removeItem('creamy-username');
     window.sessionStorage.removeItem('creamy-pokes');
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || !window.matchMedia) return undefined;
+    const mq = window.matchMedia('(max-width: 768px)');
+    const apply = (matches) => {
+      setIsMobile(matches);
+      setSidebarOpen(matches ? false : true);
+    };
+    apply(mq.matches);
+    const handler = (event) => apply(event.matches);
+    mq.addEventListener('change', handler);
+    return () => mq.removeEventListener('change', handler);
   }, []);
 
   const updateParallax = useCallback(
@@ -561,61 +576,75 @@ function App() {
           </div>
         </div>
       )}
-      <div className="mission-column fixed right-6 top-6 z-30 flex w-72 flex-col items-stretch gap-3">
-        <a
-          href="https://x.com/milkmancreamy"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="glass-button shadow-lg transition-transform duration-700 ease-out hover:-translate-y-0.5"
-        >
-          <svg viewBox="0 0 24 24" className="h-5 w-5" aria-hidden="true" focusable="false">
-            <path
-              d="M18.244 2H21l-6.46 7.386L22 22h-6.59l-4.61-6.09L5.29 22H2l6.98-7.995L2 2h6.59l4.25 5.65L18.244 2Zm-2.313 18h1.55L7.16 4h-1.6l10.37 16Z"
-              fill="currentColor"
-            />
-          </svg>
-          <span>@milkmancreamy</span>
-        </a>
-        <button
-          type="button"
-          className="glass-button justify-between shadow-lg transition-transform duration-700 ease-out hover:-translate-y-0.5"
-          onClick={() => setVideoOpen(true)}
-        >
-          <span>Watch Creamy</span>
-          <svg viewBox="0 0 24 24" className="h-5 w-5" aria-hidden="true" focusable="false">
-            <path d="M8 5v14l11-7z" fill="currentColor" />
-          </svg>
+      {isMobile && !sidebarOpen && (
+        <button type="button" className="hud-toggle glass-button" onClick={() => setSidebarOpen(true)}>
+          Stats & Pokes
         </button>
-        <div className="glass-panel">
-          <p className="text-xs uppercase tracking-[0.35em] text-white/60">Belly pokes</p>
-          <p className="mt-1 text-3xl font-semibold text-white">{pokeCount}</p>
-          <p className="text-xs text-white/60">This session • {displayName}</p>
+      )}
+      {sidebarOpen && (
+        <div
+          className={`mission-column ${isMobile ? 'mobile' : ''} fixed right-6 top-6 z-30 flex w-72 flex-col items-stretch gap-3`}
+        >
+          <a
+            href="https://x.com/milkmancreamy"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="glass-button shadow-lg transition-transform duration-700 ease-out hover:-translate-y-0.5"
+          >
+            <svg viewBox="0 0 24 24" className="h-5 w-5" aria-hidden="true" focusable="false">
+              <path
+                d="M18.244 2H21l-6.46 7.386L22 22h-6.59l-4.61-6.09L5.29 22H2l6.98-7.995L2 2h6.59l4.25 5.65L18.244 2Zm-2.313 18h1.55L7.16 4h-1.6l10.37 16Z"
+                fill="currentColor"
+              />
+            </svg>
+            <span>@milkmancreamy</span>
+          </a>
+          <button
+            type="button"
+            className="glass-button justify-between shadow-lg transition-transform duration-700 ease-out hover:-translate-y-0.5"
+            onClick={() => setVideoOpen(true)}
+          >
+            <span>Watch Creamy</span>
+            <svg viewBox="0 0 24 24" className="h-5 w-5" aria-hidden="true" focusable="false">
+              <path d="M8 5v14l11-7z" fill="currentColor" />
+            </svg>
+          </button>
+          <div className="glass-panel">
+            <p className="text-xs uppercase tracking-[0.35em] text-white/60">Belly pokes</p>
+            <p className="mt-1 text-3xl font-semibold text-white">{pokeCount}</p>
+            <p className="text-xs text-white/60">This session • {displayName}</p>
+          </div>
+          <div className="glass-panel">
+            <p className="text-xs uppercase tracking-[0.35em] text-white/60">Donuts eliminated</p>
+            <p className="mt-1 text-3xl font-semibold text-white">{donutsEliminated}</p>
+            <p className="text-xs text-white/60">
+              {totalDonuts - donutsEliminated} remaining • max {totalDonuts}
+            </p>
+          </div>
+          <div className="glass-panel overflow-hidden">
+            <p className="text-xs uppercase tracking-[0.35em] text-white/60">Top Poke Pros</p>
+            <table className="leaderboard-table">
+              <tbody>
+                {leaderboard.map((entry, index) => (
+                  <tr key={`${entry.name}-${index}`}>
+                    <td>{index + 1}</td>
+                    <td className="truncate">{entry.name}</td>
+                    <td className="text-right">{entry.pokes}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <button type="button" className="glass-button justify-center" onClick={handleReset}>
+            Reset session
+          </button>
+          {isMobile && (
+            <button type="button" className="glass-button justify-center" onClick={() => setSidebarOpen(false)}>
+              Close
+            </button>
+          )}
         </div>
-        <div className="glass-panel">
-          <p className="text-xs uppercase tracking-[0.35em] text-white/60">Donuts eliminated</p>
-          <p className="mt-1 text-3xl font-semibold text-white">{donutsEliminated}</p>
-          <p className="text-xs text-white/60">
-            {totalDonuts - donutsEliminated} remaining • max {totalDonuts}
-          </p>
-        </div>
-        <div className="glass-panel overflow-hidden">
-          <p className="text-xs uppercase tracking-[0.35em] text-white/60">Top Poke Pros</p>
-          <table className="leaderboard-table">
-            <tbody>
-              {leaderboard.map((entry, index) => (
-                <tr key={`${entry.name}-${index}`}>
-                  <td>{index + 1}</td>
-                  <td className="truncate">{entry.name}</td>
-                  <td className="text-right">{entry.pokes}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        <button type="button" className="glass-button justify-center" onClick={handleReset}>
-          Reset session
-        </button>
-      </div>
+      )}
       <div
         ref={heroRef}
         className="hero-sheen relative flex min-h-[160vh] flex-col items-center justify-start px-4 pb-32 pt-0 sm:px-10"

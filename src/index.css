@@ -108,6 +108,39 @@ body::after {
     width: min(320px, 80vw);
   }
 
+  .mission-column.mobile {
+    position: fixed;
+    left: 1rem;
+    right: 1rem;
+    bottom: 1rem;
+    top: auto;
+    width: auto;
+    max-height: 70vh;
+    padding-right: 0;
+    background: rgba(5, 6, 13, 0.9);
+    border-radius: 1.5rem;
+  }
+
+  .hud-toggle {
+    display: none;
+    position: fixed;
+    right: 1rem;
+    top: 1rem;
+    z-index: 35;
+  }
+
+  @media (max-width: 768px) {
+    .mission-banner {
+      position: static;
+      width: auto;
+      margin: 1rem;
+    }
+
+    .hud-toggle {
+      display: inline-flex;
+    }
+  }
+
   .leaderboard-table {
     width: 100%;
     border-collapse: collapse;
