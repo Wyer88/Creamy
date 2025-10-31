@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { fetchLeaderboard, isLeaderboardApiConfigured, submitLeaderboardScore } from './api/leaderboard';
+import { MAX_USERNAME_CHARACTERS, sanitizeUsernameInput, validateUsername } from './utils/username';
 
 const BELLY_ZONE = {
   minX: 0.34,
@@ -42,16 +44,7 @@ const usePrefersReducedMotion = () => {
   return prefers;
 };
 
-const PRESET_LEADERS = [
-  { name: 'CreamLord', pokes: 100 },
-  { name: 'MilkyMischief', pokes: 42 },
-  { name: 'SirSpill', pokes: 36 },
-  { name: 'DairyDuke', pokes: 28 },
-  { name: 'FoamFrenzy', pokes: 24 },
-  { name: 'LactoseLegend', pokes: 20 },
-  { name: 'ButterBuddy', pokes: 18 },
-  { name: 'CreamyCeleste', pokes: 12 },
-];
+const PRESET_LEADERS = [];
 
 const INITIAL_DONUTS = [
   { id: 'donut-0', left: '12%', top: '9%', size: 120, image: 'images/donuts-noback.png' },
@@ -85,6 +78,8 @@ function App() {
   });
   const audioCtxRef = useRef(null);
   const audioElementRef = useRef(null);
+  const thankYouAudioRef = useRef(null);
+  const hasPlayedThankYouRef = useRef(false);
 
   const [captionTick, setCaptionTick] = useState(0);
   const [captionActive, setCaptionActive] = useState(false);
@@ -97,6 +92,13 @@ function App() {
   const [isMobile, setIsMobile] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [bannerDismissed, setBannerDismissed] = useState(false);
+  const [leaderboard, setLeaderboard] = useState([]);
+  const [localLeaderboard, setLocalLeaderboard] = useState([]);
+  const [leaderboardLoading, setLeaderboardLoading] = useState(false);
+  const [leaderboardError, setLeaderboardError] = useState(null);
+  const [usernameError, setUsernameError] = useState(null);
+  const [scoreSubmitting, setScoreSubmitting] = useState(false);
+  const [scoreSubmitMessage, setScoreSubmitMessage] = useState(null);
 
   const prefersReducedMotion = usePrefersReducedMotion();
   const isCoarsePointer = useMemo(() => {
@@ -104,21 +106,72 @@ function App() {
     return window.matchMedia('(pointer: coarse)').matches;
   }, []);
   const creamyVideoHref = useMemo(() => assetPath('video/creamy-teaser.mov'), []);
-  const displayName = username.trim() || 'Guest';
+  const leaderboardEnabled = useMemo(() => isLeaderboardApiConfigured(), []);
   const handleNameChange = useCallback((event) => {
-    setUsername(event.target.value.slice(0, 32));
+    const result = validateUsername(event.target.value);
+    setUsername(result.sanitized);
+    setUsernameError(result.error);
   }, []);
+  const sanitizedDisplayName = username.trim();
+  const displayName = sanitizedDisplayName || 'Guest';
   const videoRef = useRef(null);
   const laserTimers = useRef([]);
-  const leaderboard = useMemo(() => {
-    const others = PRESET_LEADERS.filter((entry) => entry.name !== displayName);
-    const combined = [...others, { name: displayName, pokes: pokeCount }];
-    return combined.sort((a, b) => b.pokes - a.pokes).slice(0, 8);
-  }, [displayName, pokeCount]);
   const totalDonuts = INITIAL_DONUTS.length;
   const donutsEliminated = totalDonuts - donuts.length;
   const missionComplete = pokeCount >= 10 && donutsEliminated >= totalDonuts;
   const showMissionBanner = missionComplete && !bannerDismissed;
+  const effectiveLeaderboard = useMemo(
+    () => (leaderboardEnabled ? leaderboard : localLeaderboard),
+    [leaderboardEnabled, leaderboard, localLeaderboard]
+  );
+  const leaderboardRows = useMemo(() => {
+    const rankEntries = Array.isArray(effectiveLeaderboard) ? [...effectiveLeaderboard] : [];
+    const normalizeDonuts = (value) => (typeof value === 'number' && Number.isFinite(value) ? value : 0);
+    const toTimestamp = (entry) => {
+      const stamp =
+        entry?.lastUpdated ||
+        entry?.updatedAt ||
+        entry?.createdAt ||
+        entry?.updated_at ||
+        entry?.created_at ||
+        entry?.submittedAt ||
+        0;
+      const date = new Date(stamp);
+      return Number.isNaN(date.getTime()) ? Date.now() : date.getTime();
+    };
+    rankEntries.sort((a, b) => {
+      const pokeDiff = (b?.pokes || 0) - (a?.pokes || 0);
+      if (pokeDiff !== 0) return pokeDiff;
+      const donutDiff = normalizeDonuts(b?.donuts) - normalizeDonuts(a?.donuts);
+      if (donutDiff !== 0) return donutDiff;
+      return toTimestamp(a) - toTimestamp(b);
+    });
+    return rankEntries.slice(0, 10);
+  }, [effectiveLeaderboard]);
+  const recordLocalScore = useCallback(
+    (entry) => {
+      const now = new Date().toISOString();
+      setLocalLeaderboard((current) => {
+        const next = Array.isArray(current) ? [...current] : [];
+        const incomingName = entry.name.toLowerCase();
+        const existingIndex = next.findIndex((item) => item.name.toLowerCase() === incomingName);
+        if (existingIndex >= 0) {
+          const existing = next[existingIndex];
+          const isBetter =
+            entry.pokes > existing.pokes ||
+            (entry.pokes === existing.pokes && (entry.donuts || 0) >= (existing.donuts || 0));
+          if (isBetter) {
+            next[existingIndex] = { ...entry, lastUpdated: now };
+          }
+        } else {
+          next.push({ ...entry, lastUpdated: now });
+        }
+        return next;
+      });
+      setScoreSubmitMessage('Recorded locally. Configure the shared leaderboard to publish globally.');
+    },
+    []
+  );
   const handleReset = useCallback(() => {
     setUsername('');
     setPokeCount(0);
@@ -127,6 +180,60 @@ function App() {
     window.sessionStorage.removeItem('creamy-username');
     window.sessionStorage.removeItem('creamy-pokes');
   }, []);
+  const handleSubmitScore = useCallback(() => {
+    setScoreSubmitMessage(null);
+    const nameForSubmission = sanitizedDisplayName;
+    if (usernameError) {
+      setScoreSubmitMessage(usernameError);
+      return;
+    }
+    if (nameForSubmission.length < 2) {
+      const message = 'Enter at least 2 friendly characters before submitting.';
+      setUsernameError(message);
+      setScoreSubmitMessage(message);
+      return;
+    }
+    if (pokeCount <= 0) {
+      setScoreSubmitMessage('Give Creamy at least one poke before submitting.');
+      return;
+    }
+    const payload = {
+      name: nameForSubmission,
+      pokes: pokeCount,
+      donuts: donutsEliminated,
+      totalDonuts,
+    };
+    if (!leaderboardEnabled) {
+      recordLocalScore(payload);
+      return;
+    }
+    setScoreSubmitting(true);
+    submitLeaderboardScore(payload)
+      .then((result) => {
+        if (Array.isArray(result?.leaders)) {
+          setLeaderboard(result.leaders);
+        }
+        setLeaderboardError(null);
+        setScoreSubmitMessage('Score recorded! Check the leaderboard for your rank.');
+      })
+      .catch((error) => {
+        const message = error?.message || 'Unable to submit score right now.';
+        setLeaderboardError(message);
+        setScoreSubmitMessage(message);
+      })
+      .finally(() => {
+        setScoreSubmitting(false);
+      });
+  }, [
+    sanitizedDisplayName,
+    usernameError,
+    pokeCount,
+    donutsEliminated,
+    totalDonuts,
+    leaderboardEnabled,
+    recordLocalScore,
+    submitLeaderboardScore,
+  ]);
 
   useEffect(() => {
     if (typeof window === 'undefined' || !window.matchMedia) return undefined;
@@ -234,6 +341,20 @@ function App() {
       audioElement.load();
     }
   }, [synthGiggle]);
+
+  const playThankYou = useCallback(() => {
+    if (typeof window === 'undefined') return;
+    let audio = thankYouAudioRef.current;
+    if (!audio) {
+      audio = new Audio(assetPath('audio/thankyou.m4a'));
+      audio.preload = 'auto';
+      thankYouAudioRef.current = audio;
+    }
+    audio.currentTime = 0;
+    audio.play().catch(() => {
+      hasPlayedThankYouRef.current = false;
+    });
+  }, []);
 
   const spawnRipple = useCallback(
     (point, intensity = 1) => {
@@ -522,9 +643,29 @@ function App() {
 
   useEffect(() => {
     if (typeof window === 'undefined') return undefined;
+    const audio = new Audio(assetPath('audio/thankyou.m4a'));
+    audio.preload = 'auto';
+    const markUnavailable = () => {
+      thankYouAudioRef.current = null;
+    };
+    audio.addEventListener('error', markUnavailable);
+    thankYouAudioRef.current = audio;
+    return () => {
+      audio.removeEventListener('error', markUnavailable);
+      audio.pause();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return undefined;
     const storedName = window.sessionStorage.getItem('creamy-username');
     const storedPokes = window.sessionStorage.getItem('creamy-pokes');
-    if (storedName) setUsername(storedName);
+    if (storedName) {
+      const sanitized = sanitizeUsernameInput(storedName);
+      setUsername(sanitized);
+      const { error } = validateUsername(sanitized);
+      setUsernameError(error);
+    }
     if (storedPokes) {
       const parsed = Number.parseInt(storedPokes, 10);
       if (!Number.isNaN(parsed)) setPokeCount(parsed);
@@ -556,31 +697,93 @@ function App() {
   }, [missionComplete]);
 
   useEffect(() => {
+    if (!missionComplete) {
+      hasPlayedThankYouRef.current = false;
+      return;
+    }
+    if (hasPlayedThankYouRef.current) return;
+    hasPlayedThankYouRef.current = true;
+    playThankYou();
+  }, [missionComplete, playThankYou]);
+
+  useEffect(() => {
+    setScoreSubmitMessage(null);
+  }, [pokeCount, sanitizedDisplayName]);
+
+  useEffect(() => {
+    if (!leaderboardEnabled) {
+      setLeaderboard([]);
+      setLeaderboardLoading(false);
+      setLeaderboardError(null);
+      return undefined;
+    }
+    let cancelled = false;
+    setLeaderboardLoading(true);
+    fetchLeaderboard()
+      .then((leaders) => {
+        if (cancelled) return;
+        setLeaderboard(Array.isArray(leaders) ? leaders : []);
+        setLeaderboardError(null);
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        setLeaderboardError(error.message);
+      })
+      .finally(() => {
+        if (cancelled) return;
+        setLeaderboardLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [leaderboardEnabled]);
+
+  useEffect(() => {
     updateParallax({ x: 0.5, y: 0.5 });
   }, [updateParallax]);
 
   return (
     <main className="relative min-h-screen overflow-x-hidden bg-night text-white">
       {showMissionBanner && (
-        <div className="mission-banner glass-panel">
-          <button
-            type="button"
-            className="close-icon"
-            aria-label="Dismiss mission banner"
-            onClick={() => setBannerDismissed(true)}
+        <div
+          className="mission-overlay"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="mission-complete-title"
+          onClick={() => setBannerDismissed(true)}
+        >
+          <div
+            className="mission-banner glass-panel"
+            onClick={(event) => event.stopPropagation()}
           >
-            ×
-          </button>
-          <p className="text-xs uppercase tracking-[0.4em] text-creamyRose">Mission complete</p>
-          <p className="mt-2 text-sm text-white">
-            Congratulations! You've made Creamy's day! You poked his belly 10 times and helped him fetch all his missing
-            donuts. You truly are amazing.
-          </p>
-          <img
-            src={assetPath('images/goldendonut-noback.png')}
-            alt="Golden donut"
-            className="mt-3 w-full max-w-[200px] drop-shadow-creamy"
-          />
+            <button
+              type="button"
+              className="mission-banner-close"
+              aria-label="Close award"
+              onClick={() => setBannerDismissed(true)}
+            >
+              ×
+            </button>
+            <p id="mission-complete-title" className="text-xs uppercase tracking-[0.4em] text-creamyRose">
+              Mission complete
+            </p>
+            <p className="mt-3 text-sm text-white">
+              Congratulations! You've made Creamy's day! You poked his belly 10 times and helped him fetch all his
+              missing donuts. You truly are amazing.
+            </p>
+            <img
+              src={assetPath('images/goldendonut-noback.png')}
+              alt="Golden donut"
+              className="mission-banner-donut"
+            />
+            <button
+              type="button"
+              className="mission-exit-button"
+              onClick={() => setBannerDismissed(true)}
+            >
+              Back to Creamy
+            </button>
+          </div>
         </div>
       )}
       {videoOpen && (
@@ -657,19 +860,80 @@ function App() {
               {totalDonuts - donutsEliminated} remaining • max {totalDonuts}
             </p>
           </div>
+          <div className="glass-panel">
+            <label className="text-xs uppercase tracking-[0.35em] text-white/60" htmlFor="creamy-username-sidebar">
+              Username
+            </label>
+            <input
+              id="creamy-username-sidebar"
+              name="creamy-username"
+              type="text"
+              autoComplete="off"
+              maxLength={MAX_USERNAME_CHARACTERS}
+              value={username}
+              onChange={handleNameChange}
+              placeholder="e.g. MilkyMischief"
+              aria-invalid={Boolean(usernameError)}
+              aria-describedby="creamy-username-help"
+              className={`mt-2 w-full rounded-2xl border bg-white/10 px-4 py-2 text-base text-white placeholder-white/40 outline-none focus:border-creamyRose focus:bg-white/15 ${
+                usernameError ? 'border-creamyRose/60' : 'border-white/20'
+              }`}
+            />
+            <p
+              id="creamy-username-help"
+              className={`mt-2 text-xs ${usernameError ? 'text-creamyRose' : 'text-white/50'}`}
+              role={usernameError ? 'alert' : undefined}
+            >
+              {usernameError
+                ? usernameError
+                : `Keep it playful and kind — ${MAX_USERNAME_CHARACTERS} characters max.`}
+            </p>
+            <button
+              type="button"
+              className="submit-score-button glass-button mt-3 w-full justify-center"
+              onClick={handleSubmitScore}
+              disabled={scoreSubmitting}
+            >
+              {scoreSubmitting ? 'Submitting…' : 'Submit poke count'}
+            </button>
+            {scoreSubmitMessage && (
+              <p className="mt-2 text-xs text-white/60" role="status">
+                {scoreSubmitMessage}
+              </p>
+            )}
+          </div>
           <div className="glass-panel overflow-hidden">
             <p className="text-xs uppercase tracking-[0.35em] text-white/60">Top Poke Pros</p>
-            <table className="leaderboard-table">
-              <tbody>
-                {leaderboard.map((entry, index) => (
-                  <tr key={`${entry.name}-${index}`}>
-                    <td>{index + 1}</td>
-                    <td className="truncate">{entry.name}</td>
-                    <td className="text-right">{entry.pokes}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            {leaderboardError && (
+              <p className="mt-2 text-xs text-creamyRose" role="alert">
+                {leaderboardError}
+              </p>
+            )}
+            {!leaderboardEnabled && (
+              <p className="mt-2 text-xs text-white/60">
+                Scores save locally until you connect the shared leaderboard service.
+              </p>
+            )}
+            {leaderboardLoading ? (
+              <p className="mt-3 text-xs text-white/60">Loading leaderboard…</p>
+            ) : leaderboardRows.length === 0 ? (
+              <p className="mt-3 text-xs text-white/60">No runs yet — be the first to submit your pokes!</p>
+            ) : (
+              <table className="leaderboard-table">
+                <tbody>
+                  {leaderboardRows.map((entry, index) => (
+                    <tr key={`${entry.name}-${index}`}>
+                      <td>{index + 1}</td>
+                      <td className="truncate">{entry.name}</td>
+                      <td className="text-right">{entry.pokes}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+            <p className="mt-2 text-[0.65rem] uppercase tracking-[0.32em] text-white/40">
+              Only the top 10 poke runs are displayed.
+            </p>
           </div>
           <button type="button" className="glass-button justify-center" onClick={handleReset}>
             Reset session
@@ -748,37 +1012,11 @@ function App() {
             <h1 className="max-w-2xl text-4xl font-semibold text-white sm:text-5xl">
               Premium milkman mischief in one playful page
             </h1>
-          <p className="max-w-xl text-balance text-base text-white/70 sm:text-lg">
-            Scroll to send silky ripples, poke the belly for a giggle, and glide through a tactile vignette that feels
-            alive yet refined.
-          </p>
-
-          <div className="session-panel relative z-10 mt-2 w-full max-w-lg rounded-3xl border border-white/10 bg-white/5 p-5 text-left shadow-2xl backdrop-blur">
-            <p className="text-xs uppercase tracking-[0.35em] text-white/60">Tag your session</p>
-            <label className="mt-3 block text-sm text-white/80" htmlFor="creamy-username">
-              Username
-            </label>
-            <input
-              id="creamy-username"
-              name="creamy-username"
-              type="text"
-              autoComplete="off"
-              maxLength={32}
-              value={username}
-              onChange={handleNameChange}
-              placeholder="e.g. MilkyMischief"
-              className="mt-1 w-full rounded-2xl border border-white/20 bg-white/10 px-4 py-2 text-base text-white placeholder-white/40 outline-none focus:border-creamyRose focus:bg-white/15"
-            />
-            <button
-              type="button"
-              className="glass-button mt-4 w-full justify-between"
-              aria-live="polite"
-            >
-              <span>{displayName}</span>
-              <span className="text-white/80 text-sm">Pokes {pokeCount}</span>
-            </button>
+            <p className="max-w-xl text-balance text-base text-white/70 sm:text-lg">
+              Scroll to send silky ripples, poke the belly for a giggle, and glide through a tactile vignette that feels
+              alive yet refined.
+            </p>
           </div>
-        </div>
         </div>
 
         <div className="pointer-events-none absolute bottom-16 left-1/2 z-20 -translate-x-1/2" aria-live="polite">

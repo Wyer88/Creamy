@@ -33,6 +33,42 @@ Keep the same filenames to avoid code changes.
 - Keyboard-focusable “X” button with `noopener noreferrer`.
 - Audio plays only after an explicit user poke.
 
+## Shared Leaderboard Setup
+The in-page leaderboard now connects to an optional persistence service so everyone’s best poke runs can be recorded and replayed. Until the service is configured the UI falls back to local demo data.
+
+1. **Provision the service**
+   ```bash
+   cd ~/Projects/CreamySite/server
+   npm install
+   npm start
+   ```
+   This launches an Express + SQLite API on `http://localhost:8787` with endpoints:
+   - `GET /leaderboard` → aggregated highscores
+   - `GET /leaderboard/log` → most recent submissions
+   - `POST /leaderboard` → record a run (`{ name, pokes, donuts, totalDonuts }`)
+
+   Deploy the same folder anywhere Node runs (Render, Fly.io, Railway, EC2, etc.). Persist the `server/data/leaderboard.db` file to keep history between restarts.
+
+2. **Point the React app at the API**  
+   Create `~/Projects/CreamySite/.env.local` with:
+   ```bash
+   VITE_LEADERBOARD_API_BASE_URL=http://localhost:8787
+   ```
+   Replace with your deployed URL once you host the service. Restart `npm run dev` after changing env vars.
+
+3. **Verify end-to-end**  
+   - Load `npm run dev` at `http://localhost:5173`
+   - Enter a friendly username in the sidebar (filters remove offensive/unsafe text)
+   - Poke Creamy as much as you like, then hit **Submit poke count**
+   - If your run lands in the global top 10 it appears instantly in the leaderboard; otherwise it’s still logged in the `/leaderboard/log` feed
+   - Refresh the page or open another browser to see the shared leaderboard update live
+
+4. **Operational tips**
+   - Reset the leaderboard during testing with `npm run reset` (from the `server/` folder)
+   - Back up `/server/data/leaderboard.db`
+   - Extend the block-list in `src/utils/username.js` and `server/index.js` for stricter moderation
+   - Use a reverse proxy/HTTPS when exposing the API publicly
+
 ## Deploying to GitHub Pages
 This repo ships with `.github/workflows/deploy.yml`, which builds on every push to `main` and publishes the `dist/` folder to the repository’s GitHub Pages environment (`https://wyer88.github.io/Creamy/`).
 
